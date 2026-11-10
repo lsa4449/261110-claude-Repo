@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sky Fighter</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b1020; display: flex; align-items: center; justify-content: center; font-family: sans-serif; }
+  canvas { background: linear-gradient(#0d1b3d, #1c3b6e); max-height: 100vh; max-width: 100vw; }
+</style>
+</head>
+<body>
+<canvas id="c" width="480" height="720"></canvas>
+<script>
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height;
+const keys = {};
+addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault(); });
+addEventListener('keyup', e => { keys[e.code] = false; });
+
+let player, bullets, enemies, eBullets, sparks, stars, score, frame, state;
+function reset() {
+  player = { x: W / 2, y: H - 100, hp: 5, cool: 0, hurt: 0 };
+  bullets = []; enemies = []; eBullets = []; sparks = [];
+  stars = Array.from({ length: 60 }, () => ({ x: Math.random() * W, y: Math.random() * H, s: Math.random() * 2 + 1 }));
+  score = 0; frame = 0; state = 'play';
+}
+reset();
+
+const hit = (a, b, r) => Math.abs(a.x - b.x) < r && Math.abs(a.y - b.y) < r;
+function boom(x, y, n, color) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, v = Math.random() * 4 + 1;
+    sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 30, color });
+  }
+}
+
+function update() {
+  frame++;
+  stars.forEach(s => { s.y += s.s * 2; if (s.y > H) { s.y = 0; s.x = Math.random() * W; } });
+  sparks.forEach(p => { p.x += p.vx; p.y += p.vy; p.life--; });
+  sparks = sparks.filter(p => p.life > 0);
+  if (state !== 'play') { if (keys.Enter) reset(); return; }
+
+  // player movement
+  const sp = 5;
+  if (keys.ArrowLeft || keys.KeyA) player.x -= sp;
+  if (keys.ArrowRight || keys.KeyD) player.x += sp;
+  if (keys.ArrowUp || keys.KeyW) player.y -= sp;
+  if (keys.ArrowDown || keys.KeyS) player.y += sp;
+  player.x = Math.max(20, Math.min(W - 20, player.x));
+  player.y = Math.max(20, Math.min(H - 20, player.y));
+  if (player.cool > 0) player.cool--;
+  if (player.hurt > 0) player.hurt--;
+  if (keys.Space && player.cool === 0) {
+    bullets.push({ x: player.x - 10, y: player.y - 15 }, { x: player.x + 10, y: player.y - 15 });
+    player.cool = 8;
+  }
+
+  // spawn enemies faster as score grows
+  const rate = Math.max(20, 60 - Math.floor(score / 200));
+  if (frame % rate === 0) {
+    const big = Math.random() < 0.2;
+    enemies.push({ x: Math.random() * (W - 60) + 30, y: -30, vy: big ? 1.2 : 2 + Math.random() * 1.5,
+      phase: Math.random() * 6, hp: big ? 6 : 1, big, cool: 60 + Math.random() * 60 });
+  }
+
+  bullets.forEach(b => b.y -= 10);
+  eBullets.forEach(b => { b.x += b.vx; b.y += b.vy; });
+  enemies.forEach(e => {
+    e.y += e.vy;
+    e.x += Math.sin(frame / 30 + e.phase) * 1.5;
+    if (--e.cool <= 0) {
+      const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx, dy) || 1;
+      eBullets.push({ x: e.x, y: e.y + 15, vx: dx / d * 4, vy: dy / d * 4 });
+      e.cool = e.big ? 50 : 100;
+    }
+  });
+
+  // collisions
+  bullets.forEach(b => enemies.forEach(e => {
+    if (!b.dead && e.hp > 0 && hit(b, e, e.big ? 30 : 18)) {
+      b.dead = true; e.hp--;
+      if (e.hp <= 0) { score += e.big ? 500 : 100; boom(e.x, e.y, e.big ? 40 : 20, '#ffb347'); }
+    }
+  }));
+  const damage = () => {
+    if (player.hurt) return;
+    player.hp--; player.hurt = 60; boom(player.x, player.y, 15, '#7fd4ff');
+    if (player.hp <= 0) { state = 'over'; boom(player.x, player.y, 60, '#ff5555'); }
+  };
+  eBullets.forEach(b => { if (hit(b, player, 12)) { b.dead = true; damage(); } });
+  enemies.forEach(e => { if (e.hp > 0 && hit(e, player, e.big ? 32 : 22)) { e.hp = 0; boom(e.x, e.y, 20, '#ffb347'); damage(); } });
+
+  bullets = bullets.filter(b => !b.dead && b.y > -20);
+  eBullets = eBullets.filter(b => !b.dead && b.y < H + 20 && b.y > -20 && b.x > -20 && b.x < W + 20);
+  enemies = enemies.filter(e => e.hp > 0 && e.y < H + 40);
+}
+
+function drawPlane(x, y, dir, color, s) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s * dir);
+  ctx.fillStyle = color;
+  ctx.beginPath(); // fuselage
+  ctx.moveTo(0, -20); ctx.lineTo(5, -5); ctx.lineTo(5, 15); ctx.lineTo(0, 20); ctx.lineTo(-5, 15); ctx.lineTo(-5, -5);
+  ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-22, 5); ctx.lineTo(22, 5); ctx.lineTo(5, -6); ctx.lineTo(-5, -6); ctx.fill(); // wings
+  ctx.beginPath(); ctx.moveTo(-9, 18); ctx.lineTo(9, 18); ctx.lineTo(3, 10); ctx.lineTo(-3, 10); ctx.fill(); // tail
+  ctx.fillStyle = '#cdeeff'; ctx.fillRect(-2, -12, 4, 6); // cockpit
+  ctx.restore();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  stars.forEach(s => ctx.fillRect(s.x, s.y, s.s, s.s * 3));
+
+  ctx.fillStyle = '#fff36b';
+  bullets.forEach(b => ctx.fillRect(b.x - 2, b.y - 8, 4, 12));
+  ctx.fillStyle = '#ff6b6b';
+  eBullets.forEach(b => { ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, 7); ctx.fill(); });
+  enemies.forEach(e => drawPlane(e.x, e.y, -1, e.big ? '#b45cff' : '#e05050', e.big ? 1.6 : 1));
+  if (state === 'play' && !(player.hurt && frame % 8 < 4)) {
+    ctx.fillStyle = '#ffa630'; ctx.fillRect(player.x - 3, player.y + 20, 6, 4 + Math.random() * 8); // engine flame
+    drawPlane(player.x, player.y, 1, '#4fc3ff', 1.2);
+  }
+  sparks.forEach(p => { ctx.globalAlpha = p.life / 30; ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 3, 3); });
+  ctx.globalAlpha = 1;
+
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 20px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('점수 ' + score, 12, 30);
+  ctx.textAlign = 'right'; ctx.fillStyle = '#ff6b6b';
+  ctx.fillText('♥'.repeat(Math.max(0, player.hp)), W - 12, 30);
+  ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '14px sans-serif';
+  if (frame < 240 && state === 'play') ctx.fillText('방향키/WASD 이동 · 스페이스 발사', W / 2, H - 20);
+  if (state === 'over') {
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 40px sans-serif'; ctx.fillText('GAME OVER', W / 2, H / 2 - 20);
+    ctx.font = '20px sans-serif'; ctx.fillText('점수 ' + score + ' · Enter로 다시 시작', W / 2, H / 2 + 20);
+  }
+}
+
+(function loop() { update(); draw(); requestAnimationFrame(loop); })();
+</script>
+</body>
+</html>
